@@ -18,7 +18,7 @@ To run, merge, and plot using 4 processes, for instance, you could use:
 The simulation should take under 5 process-minutes to run.
 
 Usage:
-    rayleigh_benard.py [--Rayleigh=<Rayleigh> --Prandtl=<Prandtl> --restart=<restart_file>] 
+    rayleigh_benard.py [options] 
 
 Options:
     --Rayleigh=<Rayleigh>      Rayleigh number [default: 1e6]
@@ -29,6 +29,8 @@ Options:
     --restart=<restart_file>   Restart from checkpoint
     
 """
+import logging
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from mpi4py import MPI
@@ -43,9 +45,6 @@ except:
     logger.info("No checkpointing available; disabling capability")
     checkpointing = False
     
-import logging
-logger = logging.getLogger(__name__)
-
 def global_noise(domain, seed=42, scale=None, **kwargs):            
     # Random perturbations, initialized globally for same results in parallel
     gshape = domain.dist.grid_layout.global_shape(scales=domain.dealias)
@@ -78,28 +77,36 @@ def filter_field(field,frac=0.5):
         field_filter = field_filter | (cc[i][local_slice] > frac)
     field['c'][field_filter] = 0j
 
-def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None):
+def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None, data_dir='./'):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
-    
+            
     # Parameters
     Lz = 1.
     Lx = aspect*Lz
 
     if nx is None:
         nx = int(nz*aspect)
-        
+
+    logger.info("resolution: [{}x{}]".format(nx, nz))
     # Create bases and domain
     x_basis = de.Fourier('x',   nx, interval=(0, Lx), dealias=3/2)
     z_basis = de.Chebyshev('z', nz, interval=(0, Lz), dealias=3/2)
     domain = de.Domain([x_basis, z_basis], grid_dtype=np.float64)
 
+    if domain.distributor.rank == 0:
+        import os
+        if not os.path.exists('{:s}/'.format(data_dir)):
+            os.mkdir('{:s}/'.format(data_dir))
+
     # 2D Boussinesq hydrodynamics
     problem = de.IVP(domain, variables=['p','b','u','w','bz','uz','wz'])
+    problem.meta['p','b','u','w']['z']['dirichlet'] = True
+
     problem.parameters['P'] = (Rayleigh * Prandtl)**(-1/2)
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
     problem.parameters['F'] = F = 1
-
+    
     problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
     problem.substitutions['vorticity'] = '(dx(w) - uz)' 
 
@@ -119,7 +126,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
 
     # Build solver
-    solver = problem.build_solver(de.timesteppers.RK222)
+    ts = de.timesteppers.RK443
+    cfl_safety = 2
+    solver = problem.build_solver(ts)
     logger.info('Solver built')
 
     # Checkpointing
@@ -134,7 +143,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     bz = solver.state['bz']
 
     # Random perturbations, initialized globally for same results in parallel
-    noise = global_noise(domain, scale=1)
+    noise = global_noise(domain, scale=1, frac=0.25)
 
     if restart is None:
         # Linear background + perturbations damped at walls
@@ -152,7 +161,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     solver.stop_iteration = np.inf
 
     # Analysis
-    snapshots = solver.evaluator.add_file_handler('slices', sim_dt=0.1, max_writes=50)
+    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=50)
     snapshots.add_task("p")
     snapshots.add_task("b")
     snapshots.add_task("u")
@@ -160,8 +169,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     snapshots.add_task("enstrophy")
 
     # CFL
-    CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=10, safety=1,
-                         max_change=1.5, min_change=0.5, max_dt=0.1)
+    CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
+                         max_change=1.5, min_change=0.5, max_dt=0.1, threshold=0.1)
     CFL.add_velocities(('u', 'w'))
 
     # Flow properties
@@ -194,8 +203,17 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         
 if __name__ == "__main__":
     from docopt import docopt
-    args = docopt(__doc__) 
+    args = docopt(__doc__)
+
+    import sys
+    # save data in directory named after script
+    data_dir = sys.argv[0].split('.py')[0]
+    data_dir += "_Ra{}_Pr{}/".format(args['--Rayleigh'], args['--Prandtl'])
+    logger.info("saving run in: {}".format(data_dir))
+    
     Rayleigh_Benard(Rayleigh=float(args['--Rayleigh']),
                     Prandtl=float(args['--Prandtl']),
-                    restart=(args['--restart']))
+                    restart=(args['--restart']),
+                    nz=int(args['--nz']),
+                    data_dir=data_dir)
 
