@@ -23,6 +23,9 @@ Usage:
 Options:
     --Rayleigh=<Rayleigh>      Rayleigh number [default: 1e6]
     --Prandtl=<Prandtl>        Prandtl number = nu/kappa [default: 1]
+    --nz=<nz>                  Vertical resolution [default: 64]
+    --nx=<nx>                  Horizontal resolution; if not set, nx=aspect*nz_cz
+    --aspect=<aspect>          Aspect ratio of problem [default: 4]
     --restart=<restart_file>   Restart from checkpoint
     
 """
@@ -37,6 +40,7 @@ try:
     from dedalus.extras.checkpointing import Checkpoint
     checkpointing = True
 except:
+    logger.info("No checkpointing available; disabling capability")
     checkpointing = False
     
 import logging
@@ -74,16 +78,20 @@ def filter_field(field,frac=0.5):
         field_filter = field_filter | (cc[i][local_slice] > frac)
     field['c'][field_filter] = 0j
 
-def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
+def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
     
     # Parameters
-    Lx, Lz = (4., 1.)
+    Lz = 1.
+    Lx = aspect*Lz
 
+    if nx is None:
+        nx = int(nz*aspect)
+        
     # Create bases and domain
-    x_basis = de.Fourier('x', 256, interval=(0, Lx), dealias=3/2)
-    z_basis = de.Chebyshev('z', 64, interval=(-Lz/2, Lz/2), dealias=3/2)
+    x_basis = de.Fourier('x',   nx, interval=(0, Lx), dealias=3/2)
+    z_basis = de.Chebyshev('z', nz, interval=(0, Lz), dealias=3/2)
     domain = de.Domain([x_basis, z_basis], grid_dtype=np.float64)
 
     # 2D Boussinesq hydrodynamics
@@ -91,6 +99,10 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
     problem.parameters['P'] = (Rayleigh * Prandtl)**(-1/2)
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
     problem.parameters['F'] = F = 1
+
+    problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
+    problem.substitutions['vorticity'] = '(dx(w) - uz)' 
+
     problem.add_equation("dx(u) + wz = 0")
     problem.add_equation("dt(b) - P*(dx(dx(b)) + dz(bz))             = -(u*dx(b) + w*bz)")
     problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     = -(u*dx(u) + w*uz)")
@@ -140,11 +152,12 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
     solver.stop_iteration = np.inf
 
     # Analysis
-    snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=0.1, max_writes=50)
+    snapshots = solver.evaluator.add_file_handler('slices', sim_dt=0.1, max_writes=50)
     snapshots.add_task("p")
     snapshots.add_task("b")
     snapshots.add_task("u")
     snapshots.add_task("w")
+    snapshots.add_task("enstrophy")
 
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=10, safety=1,
