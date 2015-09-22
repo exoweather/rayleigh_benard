@@ -33,10 +33,46 @@ import time
 
 from dedalus import public as de
 from dedalus.extras import flow_tools
-from dedalus.extras.checkpointing import Checkpoint
-
+try:
+    from dedalus.extras.checkpointing import Checkpoint
+    checkpointing = True
+except:
+    checkpointing = False
+    
 import logging
 logger = logging.getLogger(__name__)
+
+def global_noise(domain, seed=42, scale=None, **kwargs):            
+    # Random perturbations, initialized globally for same results in parallel
+    gshape = domain.dist.grid_layout.global_shape(scales=domain.dealias)
+    slices = domain.dist.grid_layout.slices(scales=domain.dealias)
+    rand = np.random.RandomState(seed=seed)
+    noise = rand.standard_normal(gshape)[slices]
+
+    # filter in k-space
+    noise_field = domain.new_field()
+    noise_field.set_scales(domain.dealias, keep_data=False)
+    noise_field['g'] = noise
+    filter_field(noise_field, **kwargs)
+    if scale is not None:
+        noise_field.set_scales(scale, keep_data=True)
+        
+    return noise_field['g']
+
+def filter_field(field,frac=0.5):
+    logger.info("filtering field with frac={}".format(frac))
+    dom = field.domain
+    local_slice = dom.dist.coeff_layout.slices(scales=dom.dealias)
+    coeff = []
+    for i in range(dom.dim)[::-1]:
+        coeff.append(np.linspace(0,1,dom.global_coeff_shape[i],endpoint=False))
+    cc = np.meshgrid(*coeff)
+
+    field_filter = np.zeros(dom.local_coeff_shape,dtype='bool')
+
+    for i in range(dom.dim):
+        field_filter = field_filter | (cc[i][local_slice] > frac)
+    field['c'][field_filter] = 0j
 
 def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
     # input parameters
@@ -75,8 +111,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
     logger.info('Solver built')
 
     # Checkpointing
-    checkpoint = Checkpoint('./')
-    checkpoint.set_checkpoint(solver, wall_dt=60)
+    if checkpointing:
+        checkpoint = Checkpoint('./')
+        checkpoint.set_checkpoint(solver, wall_dt=60)
     
     # Initial conditions
     x = domain.grid(0)
@@ -85,10 +122,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, restart=None):
     bz = solver.state['bz']
 
     # Random perturbations, initialized globally for same results in parallel
-    gshape = domain.dist.grid_layout.global_shape(scales=1)
-    slices = domain.dist.grid_layout.slices(scales=1)
-    rand = np.random.RandomState(seed=42)
-    noise = rand.standard_normal(gshape)[slices]
+    noise = global_noise(domain, scale=1)
 
     if restart is None:
         # Linear background + perturbations damped at walls
