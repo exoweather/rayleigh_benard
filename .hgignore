@@ -1,0 +1,32 @@
+# Use glob syntax
+syntax: glob
+
+*.pyc
+*.DS_Store
+*.png
+*.db
+*.c
+*.so
+*.o
+*~
+
+# Dedalus data output
+*.h5
+
+# scaling databases
+*.db.*
+
+# latex files
+*.log
+*.dvi
+*.aux
+*.blg
+
+# pyprof2html files
+*.js
+*.css
+*.html
+
+# tarballs
+*.tar
+
