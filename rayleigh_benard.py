@@ -4,26 +4,13 @@ Dedalus script for 2D Rayleigh-Benard convection.
 This script uses a Fourier basis in the x direction with periodic boundary
 conditions.  The equations are scaled in units of the buoyancy time (Fr = 1).
 
-This script can be ran serially or in parallel, and uses the built-in analysis
-framework to save data snapshots in HDF5 files.  The `merge.py` script in this
-folder can be used to merge distributed analysis sets from parallel runs,
-and the `plot_2d_series.py` script can be used to plot the snapshots.
-
-To run, merge, and plot using 4 processes, for instance, you could use:
-    $ mpiexec -n 4 python3 rayleigh_benard.py
-    $ mpiexec -n 4 python3 merge.py snapshots
-    $ mpiexec -n 4 python3 merge.py checkpoint    
-    $ mpiexec -n 4 python3 plot_2d_series.py snapshots/*.h5
-
-The simulation should take under 5 process-minutes to run.
-
 Usage:
     rayleigh_benard.py [options] 
 
 Options:
     --Rayleigh=<Rayleigh>      Rayleigh number [default: 1e6]
     --Prandtl=<Prandtl>        Prandtl number = nu/kappa [default: 1]
-    --nz=<nz>                  Vertical resolution [default: 64]
+    --nz=<nz>                  Vertical resolution [default: 128]
     --nx=<nx>                  Horizontal resolution; if not set, nx=aspect*nz_cz
     --aspect=<aspect>          Aspect ratio of problem [default: 4]
     --restart=<restart_file>   Restart from checkpoint
@@ -38,6 +25,7 @@ import time
 
 from dedalus import public as de
 from dedalus.extras import flow_tools
+from dedalus.tools  import post
 try:
     from dedalus.extras.checkpointing import Checkpoint
     checkpointing = True
@@ -107,6 +95,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
     problem.parameters['F'] = F = 1
     
+    problem.parameters['Lx'] = Lx
+    problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
+    
     problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
     problem.substitutions['vorticity'] = '(dx(w) - uz)' 
 
@@ -126,15 +117,21 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
 
     # Build solver
+    ts = de.timesteppers.RK222
+    cfl_safety = 1.5 # works
+    #cfl_safety = 1.6 # verge of breaking
+    #cfl_safety = 1.75 # breaks
+
     ts = de.timesteppers.RK443
-    cfl_safety = 2
+    cfl_safety = 2 # works
+    
     solver = problem.build_solver(ts)
     logger.info('Solver built')
 
     # Checkpointing
     if checkpointing:
-        checkpoint = Checkpoint('./')
-        checkpoint.set_checkpoint(solver, wall_dt=60)
+        checkpoint = Checkpoint(data_dir)
+        checkpoint.set_checkpoint(solver, wall_dt=1800)
     
     # Initial conditions
     x = domain.grid(0)
@@ -161,13 +158,14 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     solver.stop_iteration = np.inf
 
     # Analysis
+    analysis_tasks = []
     snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=50)
-    snapshots.add_task("p")
     snapshots.add_task("b")
-    snapshots.add_task("u")
-    snapshots.add_task("w")
+    snapshots.add_task("b - plane_avg(b)", name="b'")
     snapshots.add_task("enstrophy")
-
+    snapshots.add_task("vorticity")
+    analysis_tasks.append(snapshots)
+    
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
                          max_change=1.5, min_change=0.5, max_dt=0.1, threshold=0.1)
@@ -186,7 +184,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         start_time = time.time()
         while solver.ok:
             dt = CFL.compute_dt()
-            solver.step(dt)
+            solver.step(dt) #, trim=True)
             if (solver.iteration-1) % 10 == 0:
                 logger.info('Iteration: %i, Time: %e, dt: %e' %(solver.iteration, solver.sim_time, dt))
                 logger.info('Max Re = %f' %flow.max('Re'))
@@ -199,7 +197,15 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         logger.info('Sim end time: %f' %solver.sim_time)
         logger.info('Run time: %.2f sec' %(end_time-start_time))
         logger.info('Run time: %f cpu-hr' %((end_time-start_time)/60/60*domain.dist.comm_cart.size))
+        
+        logger.info('beginning join operation')
+        if checkpointing:
+            logger.info(data_dir+'/checkpoint/')
+            post.merge_analysis(data_dir+'/checkpoint/')
 
+        for task in analysis_tasks:
+            logger.info(task.base_path)
+            post.merge_analysis(task.base_path)
         
 if __name__ == "__main__":
     from docopt import docopt
@@ -208,12 +214,20 @@ if __name__ == "__main__":
     import sys
     # save data in directory named after script
     data_dir = sys.argv[0].split('.py')[0]
-    data_dir += "_Ra{}_Pr{}/".format(args['--Rayleigh'], args['--Prandtl'])
+    data_dir += "_Ra{}_Pr{}_a{}/".format(args['--Rayleigh'], args['--Prandtl'], args['--aspect'])
     logger.info("saving run in: {}".format(data_dir))
-    
+
+    if args['--nx'] is not None:
+        nx = int(args['--nx'])
+    else:
+        nx = None
+        
     Rayleigh_Benard(Rayleigh=float(args['--Rayleigh']),
                     Prandtl=float(args['--Prandtl']),
                     restart=(args['--restart']),
+                    aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
+                    nx=nx,
                     data_dir=data_dir)
+    
 
