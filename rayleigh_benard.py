@@ -14,6 +14,7 @@ Options:
     --nx=<nx>                  Horizontal resolution; if not set, nx=aspect*nz_cz
     --aspect=<aspect>          Aspect ratio of problem [default: 4]
     --restart=<restart_file>   Restart from checkpoint
+    --label=<label>            Optional additional case name label
     
 """
 import logging
@@ -117,13 +118,15 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
 
     # Build solver
-    ts = de.timesteppers.RK222
-    cfl_safety = 1.5 # works
+    #ts = de.timesteppers.RK222
+    #cfl_safety = 1
+    #cfl_safety = 1.5 # works; rings
     #cfl_safety = 1.6 # verge of breaking
     #cfl_safety = 1.75 # breaks
 
     ts = de.timesteppers.RK443
-    cfl_safety = 2 # works
+    cfl_safety = 1 #1.5
+    #cfl_safety = 2 # works; rings
     
     solver = problem.build_solver(ts)
     logger.info('Solver built')
@@ -153,13 +156,13 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         checkpoint.restart(restart, solver)
         
     # Integration parameters
-    solver.stop_sim_time = 30
-    solver.stop_wall_time = 30 * 60.
+    solver.stop_sim_time = 50
+    solver.stop_wall_time = 23.5*3600.
     solver.stop_iteration = np.inf
 
     # Analysis
     analysis_tasks = []
-    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=50)
+    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=10)
     snapshots.add_task("b")
     snapshots.add_task("b - plane_avg(b)", name="b'")
     snapshots.add_task("enstrophy")
@@ -214,7 +217,10 @@ if __name__ == "__main__":
     import sys
     # save data in directory named after script
     data_dir = sys.argv[0].split('.py')[0]
-    data_dir += "_Ra{}_Pr{}_a{}/".format(args['--Rayleigh'], args['--Prandtl'], args['--aspect'])
+    data_dir += "_Ra{}_Pr{}_a{}".format(args['--Rayleigh'], args['--Prandtl'], args['--aspect'])
+    if args['--label'] is not None:
+        data_dir += "_{}".format(args['--label'])
+    data_dir += '/'
     logger.info("saving run in: {}".format(data_dir))
 
     if args['--nx'] is not None:
