@@ -97,7 +97,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.parameters['F'] = F = 1
     
     problem.parameters['Lx'] = Lx
+    problem.parameters['Lz'] = Lz
     problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
+    problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
     
     problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
     problem.substitutions['vorticity'] = '(dx(w) - uz)' 
@@ -168,7 +170,24 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
-    
+
+    coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
+    coeffs.add_task("b", layout='c')
+    coeffs.add_task("b - plane_avg(b)", name="b'", layout='c')
+    coeffs.add_task("w", layout='c')
+    coeffs.add_task("u", layout='c')
+    coeffs.add_task("enstrophy", layout='c')
+    coeffs.add_task("vorticity", layout='c')
+    analysis_tasks.append(coeffs)
+
+    scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
+    scalar.add_task("vol_avg(b)", name="IE")
+    scalar.add_task("0.5*vol_avg(u*u+w*w)", name="KE")
+    scalar.add_task("0.5*vol_avg(u*u)", name="KE_x")
+    scalar.add_task("0.5*vol_avg(w*w)", name="KE_z")
+    scalar.add_task("0.5*vol_avg(u*u+w*w)-vol_avg(b)", name="TE")
+    analysis_tasks.append(scalar)
+                    
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
                          max_change=1.5, min_change=0.5, max_dt=0.1, threshold=0.1)
