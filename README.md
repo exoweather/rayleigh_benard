@@ -37,7 +37,7 @@ mpirun -np 512 python3 rayleigh_benard.py --nz=1024 --Rayleigh=1e9 --aspect=2
 We are using docopt in these general driver cases, and
 ```
 #!bash
-python3 FC_multi.py --help
+python3 rayleigh_benard.py --help
 ```
 will describe various command-line options.
 
