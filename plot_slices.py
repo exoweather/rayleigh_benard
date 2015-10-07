@@ -299,7 +299,8 @@ class Image():
 
     
 
-def main(files, fields, output_path='./', output_name='snapshot', static_scale=True, profile_files=None):
+def main(files, fields, output_path='./', output_name='snapshot',
+         static_scale=False, profile_files=None):
     from mpi4py import MPI
 
     comm_world = MPI.COMM_WORLD
@@ -336,7 +337,10 @@ def main(files, fields, output_path='./', output_name='snapshot', static_scale=T
             current_data.append(data.data[field][i,:])
                     
         imagestack.update(current_data)
-                                              
+        if not static_scale:
+            for i_im, image in enumerate(imagestack.images):
+                image.set_scale(*image.get_scale(current_data[i_im]))
+                                                      
         i_fig = data.writes[i]
         # Update time title
         tstr = 't = {:6.3e}'.format(time)
