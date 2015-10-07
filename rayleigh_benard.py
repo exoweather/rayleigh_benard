@@ -180,6 +180,12 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     coeffs.add_task("vorticity", layout='c')
     analysis_tasks.append(coeffs)
 
+    profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
+    profiles.add_task("plane_avg(b)", name="b")
+    profiles.add_task("plane_avg(u)")
+    profiles.add_task("plane_avg(enstrophy)")
+    analysis_tasks.append(profiles)
+
     scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
     scalar.add_task("vol_avg(b)", name="IE")
     scalar.add_task("0.5*vol_avg(u*u+w*w)", name="KE")
@@ -207,9 +213,10 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         while solver.ok:
             dt = CFL.compute_dt()
             solver.step(dt) #, trim=True)
-            if (solver.iteration-1) % 10 == 0:
-                logger.info('Iteration: %i, Time: %e, dt: %e' %(solver.iteration, solver.sim_time, dt))
-                logger.info('Max Re = %f' %flow.max('Re'))
+            if (solver.iteration-1) % 1 == 0:
+                log_string = 'Iteration: {:5d}, Time: {:8.3e}, dt: {:8.3e}, '.format(solver.iteration, solver.sim_time, dt)
+                log_string += 'Re: {:8.3e}/{:8.3e}'.format(flow.grid_average('Re'), flow.max('Re'))
+                logger.info(log_string)
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise
