@@ -182,8 +182,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
 
     profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
     profiles.add_task("plane_avg(b)", name="b")
-    profiles.add_task("plane_avg(u)")
-    profiles.add_task("plane_avg(enstrophy)")
+    profiles.add_task("plane_avg(u)", name="u")
+    profiles.add_task("plane_avg(enstrophy)", name="enstrophy")
     analysis_tasks.append(profiles)
 
     scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
@@ -193,18 +193,18 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     scalar.add_task("0.5*vol_avg(w*w)", name="KE_z")
     scalar.add_task("0.5*vol_avg(u*u+w*w)-vol_avg(b)", name="TE")
     analysis_tasks.append(scalar)
-                    
+
+    # workaround for issue #29
+    problem.namespace['enstrophy'].store_last = True
+
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
                          max_change=1.5, min_change=0.5, max_dt=0.1, threshold=0.1)
     CFL.add_velocities(('u', 'w'))
 
     # Flow properties
-    flow = flow_tools.GlobalFlowProperty(solver, cadence=10)
+    flow = flow_tools.GlobalFlowProperty(solver, cadence=1)
     flow.add_property("sqrt(u*u + w*w) / R", name='Re')
-
-
-
 
     # Main loop
     try:
@@ -213,10 +213,10 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         while solver.ok:
             dt = CFL.compute_dt()
             solver.step(dt) #, trim=True)
-            if (solver.iteration-1) % 1 == 0:
-                log_string = 'Iteration: {:5d}, Time: {:8.3e}, dt: {:8.3e}, '.format(solver.iteration, solver.sim_time, dt)
-                log_string += 'Re: {:8.3e}/{:8.3e}'.format(flow.grid_average('Re'), flow.max('Re'))
-                logger.info(log_string)
+            log_string =  'Iteration: {:5d}, '.format(solver.iteration)
+            log_string += 'Time: {:8.3e}, dt: {:8.3e}, '.format(solver.sim_time, dt)
+            log_string += 'Re: {:8.3e}/{:8.3e}'.format(flow.grid_average('Re'), flow.max('Re'))
+            logger.info(log_string)
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise
