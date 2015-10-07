@@ -112,10 +112,10 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("wz - dz(w) = 0")
     problem.add_bc("left(b) = left(-F*z)")
-    problem.add_bc("left(u) = 0")
+    problem.add_bc("left(uz) = 0")
     problem.add_bc("left(w) = 0")
     problem.add_bc("right(b) = right(-F*z)")
-    problem.add_bc("right(u) = 0")
+    problem.add_bc("right(uz) = 0")
     problem.add_bc("right(w) = 0", condition="(nx != 0)")
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
 
