@@ -10,9 +10,10 @@ Usage:
 Options:
     --Rayleigh=<Rayleigh>      Rayleigh number [default: 1e6]
     --Prandtl=<Prandtl>        Prandtl number = nu/kappa [default: 1]
-    --nz=<nz>                  Vertical resolution [default: 128]
-    --nx=<nx>                  Horizontal resolution; if not set, nx=aspect*nz_cz
-    --aspect=<aspect>          Aspect ratio of problem [default: 4]
+    --nz=<nz>                  Vertical resolution (8 yields single precision, 16 yields near double precision) [default: 8]
+    --nx=<nx>                  Horizontal resolution [default: 128]
+    --multiplier=<multiplier>  How much higher resolution is the verification run [default: 1.5]
+    --aspect=<aspect>          Aspect ratio of problem [default: 64]
     --restart=<restart_file>   Restart from checkpoint
     --label=<label>            Optional additional case name label
 
@@ -24,71 +25,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 import numpy as np
-from mpi4py import MPI
 import time
 
 from dedalus import public as de
-from dedalus.extras import flow_tools
-from dedalus.tools  import post
-try:
-    from dedalus.extras.checkpointing import Checkpoint
-    checkpointing = True
-except:
-    logger.info("No checkpointing available; disabling capability")
-    checkpointing = False
-    
-def global_noise(domain, seed=42, scale=None, **kwargs):            
-    # Random perturbations, initialized globally for same results in parallel
-    gshape = domain.dist.grid_layout.global_shape(scales=domain.dealias)
-    slices = domain.dist.grid_layout.slices(scales=domain.dealias)
-    rand = np.random.RandomState(seed=seed)
-    noise = rand.standard_normal(gshape)[slices]
 
-    # filter in k-space
-    noise_field = domain.new_field()
-    noise_field.set_scales(domain.dealias, keep_data=False)
-    noise_field['g'] = noise
-    filter_field(noise_field, **kwargs)
-    if scale is not None:
-        noise_field.set_scales(scale, keep_data=True)
-        
-    return noise_field['g']
-
-def filter_field(field,frac=0.5):
-    logger.info("filtering field with frac={}".format(frac))
-    dom = field.domain
-    local_slice = dom.dist.coeff_layout.slices(scales=dom.dealias)
-    coeff = []
-    for i in range(dom.dim)[::-1]:
-        coeff.append(np.linspace(0,1,dom.global_coeff_shape[i],endpoint=False))
-    cc = np.meshgrid(*coeff)
-
-    field_filter = np.zeros(dom.local_coeff_shape,dtype='bool')
-
-    for i in range(dom.dim):
-        field_filter = field_filter | (cc[i][local_slice] > frac)
-    field['c'][field_filter] = 0j
-
-def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None, data_dir='./',
-                    no_slip=False, stress_free=False, no_lid=False):
+def Rayleigh_Benard_onset(Prandtl=1, nz=32, nx=128, aspect=64, data_dir='./',
+                          multiplier=1.5,
+                          no_slip=False, stress_free=False, no_lid=False):
     if not no_slip and not stress_free and not no_lid:
         no_slip = True
         
     # input parameters
-    logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
+    logger.info(" Pr = {}".format(Prandtl))
             
     # Parameters
     Lz = 1.
     Lx = aspect*Lz
 
-    if nx is None:
-        nx = int(nz*aspect)
-
     logger.info("resolution: [{}x{}]".format(nx, nz))
     # Create bases and domain
     x_basis = de.Fourier('x',   nx, interval=(0, Lx), dealias=3/2)
     z_basis_set = []
-    nz_set = [nz, int(nz*3/2)]
+    nz_set = [nz, int(nz*multiplier)]
     for nz_solve in nz_set:
         z_basis_set.append(de.Chebyshev('z', nz_solve, interval=(0, Lz), dealias=3/2))
 
@@ -109,11 +67,25 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         problem.parameters['Lz'] = Lz
         problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
         problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
-    
+
+        # for eq_type_1 = False; not working
+        problem.substitutions['dt(f)'] = '(0*f)'
+        problem.substitutions['P'] = '(1/sqrt(Ra)*1/sqrt(Pr))'
+        problem.substitutions['R'] = '(1/sqrt(Ra)*sqrt(Pr))'            
+        #problem.substitutions['scale'] = 'sqrt(Ra)' 
+
+        eq_type_1 = True
         problem.add_equation("dx(u) + wz = 0")
-        problem.add_equation(" - (dx(dx(b)) + dz(bz)) - F*w          = 0")
-        problem.add_equation(" - (dx(dx(u)) + dz(uz)) + dx(p)        = 0")
-        problem.add_equation(" - (dx(dx(w)) + dz(wz)) + dz(p) - Ra*b = 0")
+        if eq_type_1:    
+            problem.add_equation(" - (dx(dx(b)) + dz(bz)) - F*w          = 0")
+            problem.add_equation(" - (dx(dx(u)) + dz(uz)) + dx(p)        = 0")
+            problem.add_equation(" - (dx(dx(w)) + dz(wz)) + dz(p) - Ra*b = 0")
+        else:
+            # not working
+            problem.add_equation("(dt(b) - P*(dx(dx(b)) + dz(bz)) - F*w       ) = -(u*dx(b) + w*bz)")
+            problem.add_equation("(dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     ) = -(u*dx(u) + w*uz)")
+            problem.add_equation("(dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - b ) = -(u*dx(w) + w*wz)")
+            
         problem.add_equation("bz - dz(b) = 0")
         problem.add_equation("uz - dz(u) = 0")
         problem.add_equation("wz - dz(w) = 0")
@@ -147,7 +119,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         crit_Ra_set = []
         min_wavenumber = 1
         max_wavenumber = int(nx/2)
-        max_wavenumber = 32
         first_output = True
         for wave in np.arange(min_wavenumber, max_wavenumber):
             low_e_val_set = []
@@ -160,12 +131,12 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
             
             if np.isfinite(low_e_val_set[0]):
                 if first_output:
-                    print("k_h      Ra_1             Ra_2            relative error")
-                    print("       (nz={:4d})        (nz={:4d})    |Ra_1 - Ra_2|/|Ra_1|".format(nz_set[0], nz_set[1]))
+                    print("k_h                      Ra_1           Ra_2            relative error")
+                    print("                       (nz={:4d})      (nz={:4d})    |Ra_1 - Ra_2|/|Ra_1|".format(nz_set[0], nz_set[1]))
                     first_output = False
                     
-                print("{:12.4g}   {:>12.4g}   {:>12.4g}   {:8.3g}".format(wave/Lx, low_e_val_set[0], low_e_val_set[1],
-                                                    np.abs(np.abs(low_e_val_set[0]-low_e_val_set[1])/low_e_val_set[0])))
+                print("{:4d}:{:12.4g}   {:>12.4g}   {:>12.4g}   {:8.3g}".format(wave, wave/Lx, low_e_val_set[0], low_e_val_set[1],
+                                                                                np.abs(np.abs(low_e_val_set[0]-low_e_val_set[1])/low_e_val_set[0])))
                 crit_Ra_set.append(low_e_val_set[1])
             else:
                 print(wave, "no finite values")
@@ -174,7 +145,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         raise
     finally:
         i_min_Ra = np.argmin(crit_Ra_set)
-        logger.info("Minimum Ra = {:g} at wavenumber={:d}".format(crit_Ra_set[i_min_Ra], i_min_Ra + min_wavenumber))
+        logger.info("Minimum Ra = {:g} at wavenumber={:g} (# {:d})".format(crit_Ra_set[i_min_Ra], (i_min_Ra + min_wavenumber)/Lx, i_min_Ra + min_wavenumber))
         end_time = time.time()
         logger.info('Run time: %.2f sec' %(end_time-start_time))
         #logger.info('Run time: %f cpu-hr' %((end_time-start_time)/60/60*domain.dist.comm_cart.size))
@@ -190,20 +161,20 @@ if __name__ == "__main__":
     if args['--label'] is not None:
         data_dir += "_{}".format(args['--label'])
     data_dir += '/'
-    logger.info("saving run in: {}".format(data_dir))
+    #logger.info("saving run in: {}".format(data_dir))
 
     if args['--nx'] is not None:
         nx = int(args['--nx'])
     else:
         nx = None
         
-    Rayleigh_Benard(Rayleigh=float(args['--Rayleigh']),
+    Rayleigh_Benard_onset(
                     Prandtl=float(args['--Prandtl']),
-                    restart=(args['--restart']),
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
                     data_dir=data_dir,
+                    multiplier=float(args['--multiplier']),
                     no_slip=args['--no_slip'],
                     stress_free=args['--stress_free'],
                     no_lid=args['--no_lid'])
