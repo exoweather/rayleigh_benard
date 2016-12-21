@@ -4,8 +4,12 @@ Dedalus script for 2D Rayleigh-Benard convection.
 This script uses a Fourier basis in the x direction with periodic boundary
 conditions.  The equations are scaled in units of the buoyancy time (Fr = 1).
 
+This script caculates the critical onset, based on the Froude number
+non-dimensionalized equations.  It does this by solving for eigenvalues
+of the diffusivity parameter "R" and then reconstructing a Rayleigh number.
+
 Usage:
-    rayleigh_benard_onset.py [options] 
+    rayleigh_benard_onset_nu.py [options] 
 
 Options:
     --Rayleigh=<Rayleigh>      Rayleigh number [default: 1e6]
@@ -68,23 +72,14 @@ def Rayleigh_Benard_onset(Prandtl=1, nz=32, nx=128, aspect=64, data_dir='./',
         problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
         problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
 
-        # for eq_type_1 = False; not working
         problem.substitutions['dt(f)'] = '(0*f)'
-        problem.substitutions['P'] = 'R*Pr' #(1/sqrt(Ra)*1/sqrt(Pr))'
-        #problem.substitutions['R'] = '(1/sqrt(Ra)*sqrt(Pr))'            
-        #problem.substitutions['scale'] = 'sqrt(Ra)' 
+        problem.substitutions['P'] = 'R*Pr'
 
         eq_type_1 = False
         problem.add_equation("dx(u) + wz = 0")
-        if eq_type_1:    
-            problem.add_equation(" - (dx(dx(b)) + dz(bz)) - F*w          = 0")
-            problem.add_equation(" - (dx(dx(u)) + dz(uz)) + dx(p)        = 0")
-            problem.add_equation(" - (dx(dx(w)) + dz(wz)) + dz(p) - Ra*b = 0")
-        else:
-            # not working
-            problem.add_equation("(dt(b) - P*(dx(dx(b)) + dz(bz)) - F*w       ) = -(u*dx(b) + w*bz)")
-            problem.add_equation("(dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     ) = -(u*dx(u) + w*uz)")
-            problem.add_equation("(dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - b ) = -(u*dx(w) + w*wz)")
+        problem.add_equation("dt(b) - P*(dx(dx(b)) + dz(bz)) - F*w        = -(u*dx(b) + w*bz)")
+        problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)      = -(u*dx(u) + w*uz)")
+        problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - b  = -(u*dx(w) + w*wz)")
             
         problem.add_equation("bz - dz(b) = 0")
         problem.add_equation("uz - dz(u) = 0")
@@ -126,6 +121,7 @@ def Rayleigh_Benard_onset(Prandtl=1, nz=32, nx=128, aspect=64, data_dir='./',
                 solver.solve(solver.pencils[wave])
                 eigenvalue_indices = np.argsort(solver.eigenvalues)
                 eigenvalues = np.copy(solver.eigenvalues[eigenvalue_indices][::-1])
+                # we take the real part, since the imaginary part is amplified to machine epsilon by division and squaring operations to follow
                 eigenvalues = np.real(eigenvalues[np.isfinite(eigenvalues)])
                 low_e_val_set.append(Prandtl/eigenvalues[0]**2)
             x_grid = solver.domain.grid(0)

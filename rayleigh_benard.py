@@ -133,6 +133,12 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     solver = problem.build_solver(ts)
     logger.info('Solver built')
 
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(1,1,1)
+    ax.spy(solver.pencils[0].L, markersize=1, markeredgewidth=0.0)
+    fig.savefig("sparsity_pattern.png", dpi=1200)
+        
     # Checkpointing
     if checkpointing:
         checkpoint = Checkpoint(data_dir)
@@ -206,6 +212,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     flow = flow_tools.GlobalFlowProperty(solver, cadence=1)
     flow.add_property("sqrt(u*u + w*w) / R", name='Re')
 
+    first_step = True
     # Main loop
     try:
         logger.info('Starting loop')
@@ -217,6 +224,20 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
             log_string += 'Time: {:8.3e}, dt: {:8.3e}, '.format(solver.sim_time, dt)
             log_string += 'Re: {:8.3e}/{:8.3e}'.format(flow.grid_average('Re'), flow.max('Re'))
             logger.info(log_string)
+            if first_step:
+                import scipy.sparse.linalg as sla
+                LU = sla.splu(solver.pencils[0].LHS.tocsc(), permc_spec='NATURAL')
+                fig = plt.figure()
+                ax = fig.add_subplot(1,2,1)
+                ax.spy(LU.L.A, markersize=1, markeredgewidth=0.0)
+                ax = fig.add_subplot(1,2,2)
+                ax.spy(LU.U.A, markersize=1, markeredgewidth=0.0)
+                fig.savefig("sparsity_pattern_LU.png", dpi=1200)
+                logger.info("{} nonzero entries in LU".format(LU.nnz))
+                logger.info("{} nonzero entries in LHS".format(solver.pencils[0].LHS.tocsc().nnz))
+                logger.info("{} fill in factor".format(LU.nnz/solver.pencils[0].LHS.tocsc().nnz))
+
+                first_step=False
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise
