@@ -13,10 +13,15 @@ Options:
     --nz=<nz>                  Vertical resolution [default: 128]
     --nx=<nx>                  Horizontal resolution; if not set, nx=aspect*nz_cz
     --aspect=<aspect>          Aspect ratio of problem [default: 4]
+
+    --run_time=<run_time>             Run time, in hours [default: 23.5]
+    --run_time_buoy=<run_time_bouy>   Run time, in buoyancy times [default: 50]
+    --run_time_iter=<run_time_iter>   Run time, number of iterations; if not set, n_iter=np.inf
+
     --restart=<restart_file>   Restart from checkpoint
+
     --label=<label>            Optional additional case name label
     --verbose                  Do verbose output (e.g., sparsity patterns of arrays)
-
     --no_coeffs                If flagged, coeffs will not be output   
 """
 import logging
@@ -69,6 +74,7 @@ def filter_field(field,frac=0.5):
     field['c'][field_filter] = 0j
 
 def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None,
+                    run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
                     data_dir='./', coeff_output=True, verbose=False):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
@@ -161,9 +167,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         checkpoint.restart(restart, solver)
         
     # Integration parameters
-    solver.stop_sim_time = 50
-    solver.stop_wall_time = 23.5*3600.
-    solver.stop_iteration = np.inf
+    solver.stop_sim_time  = run_time_buoyancy
+    solver.stop_wall_time = run_time*3600.
+    solver.stop_iteration = run_time_iter
 
     # Analysis
     analysis_tasks = []
@@ -256,7 +262,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         logger.info('Sim end time: {:f}'.format(solver.sim_time))
         logger.info('Run time: {:f} sec'.format(main_loop_time))
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
-        logger.info('iter/sec: {:f}'.format((solver.iteration-1)/main_loop_time))
+        logger.info('iter/sec: {:f} (main loop only)'.format((solver.iteration-1)/main_loop_time))
         
         logger.info('beginning join operation')
         if checkpointing:
@@ -272,7 +278,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         logger.info('Sim end time: {:f}'.format(solver.sim_time))
         logger.info('Run time: {:f} sec'.format(main_loop_time))
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
-        logger.info('iter/sec: {:f}'.format((solver.iteration-1)/main_loop_time))
+        logger.info('iter/sec: {:f} (main loop only)'.format((solver.iteration-1)/main_loop_time))
 
 if __name__ == "__main__":
     from docopt import docopt
@@ -298,6 +304,9 @@ if __name__ == "__main__":
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
+                    run_time=float(args['--run_time']),
+                    run_time_buoyancy=float(args['--run_time_buoy']),
+                    run_time_iter=int(float(args['--run_time_iter'])),
                     data_dir=data_dir,
                     coeff_output=not(args['--no_coeffs']),
                     verbose=args['--verbose'])
