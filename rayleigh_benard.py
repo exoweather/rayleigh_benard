@@ -282,14 +282,24 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     finally:
         end_time = time.time()
         main_loop_time = end_time-start_time
-        logger.info('Iterations: {:d}'.format(solver.iteration))
+        n_iter_loop = solver.iteration-1
+        logger.info('Iterations: {:d}'.format(n_iter_loop))
         logger.info('Sim end time: {:f}'.format(solver.sim_time))
         logger.info('Run time: {:f} sec'.format(main_loop_time))
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
-        logger.info('iter/sec: {:f} (main loop only)'.format((solver.iteration-1)/main_loop_time))
+        logger.info('iter/sec: {:f} (main loop only)'.format(n_iter_loop/main_loop_time))
         
         logger.info('beginning join operation')
         if checkpointing:
+            try:
+                final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
+                final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
+                solver.step(dt) #clean this up in the future...works for now.
+                logger.info(data_dir+'/final_checkpoint/')
+                post.merge_analysis(data_dir+'/final_checkpoint/')
+            except:
+                print('cannot save final checkpoint')
+
             logger.info(data_dir+'/checkpoint/')
             post.merge_analysis(data_dir+'/checkpoint/')
 
@@ -298,11 +308,11 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
             post.merge_analysis(task.base_path)
 
         logger.info(40*"=")
-        logger.info('Iterations: {:d}'.format(solver.iteration))
+        logger.info('Iterations: {:d}'.format(n_iter_loop))
         logger.info('Sim end time: {:f}'.format(solver.sim_time))
         logger.info('Run time: {:f} sec'.format(main_loop_time))
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
-        logger.info('iter/sec: {:f} (main loop only)'.format((solver.iteration-1)/main_loop_time))
+        logger.info('iter/sec: {:f} (main loop only)'.format(n_iter_loop/main_loop_time))
 
 if __name__ == "__main__":
     from docopt import docopt
