@@ -91,7 +91,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
 
     # 2D Boussinesq hydrodynamics
     problem = de.IVP(domain, variables=['p','b','u','w','bz','uz','wz'])
-    problem.meta['p','b','u','w']['z']['dirichlet'] = True
+    problem.meta['p','b','uz','w']['z']['dirichlet'] = True
 
     problem.parameters['P'] = (Rayleigh * Prandtl)**(-1/2)
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
