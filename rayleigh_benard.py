@@ -16,7 +16,8 @@ Options:
     --restart=<restart_file>   Restart from checkpoint
     --label=<label>            Optional additional case name label
     --verbose                  Do verbose output (e.g., sparsity patterns of arrays)
-    
+
+    --no_coeffs                If flagged, coeffs will not be output   
 """
 import logging
 logger = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ def filter_field(field,frac=0.5):
         field_filter = field_filter | (cc[i][local_slice] > frac)
     field['c'][field_filter] = 0j
 
-def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None, data_dir='./', verbose=False):
+def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None,
+                    data_dir='./', coeff_output=True, verbose=False):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
             
@@ -172,14 +174,15 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
 
-    coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
-    coeffs.add_task("b", layout='c')
-    coeffs.add_task("b - plane_avg(b)", name="b'", layout='c')
-    coeffs.add_task("w", layout='c')
-    coeffs.add_task("u", layout='c')
-    coeffs.add_task("enstrophy", layout='c')
-    coeffs.add_task("vorticity", layout='c')
-    analysis_tasks.append(coeffs)
+    if coeff_output:
+        coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
+        coeffs.add_task("b", layout='c')
+        coeffs.add_task("b - plane_avg(b)", name="b'", layout='c')
+        coeffs.add_task("w", layout='c')
+        coeffs.add_task("u", layout='c')
+        coeffs.add_task("enstrophy", layout='c')
+        coeffs.add_task("vorticity", layout='c')
+        analysis_tasks.append(coeffs)
 
     profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
     profiles.add_task("plane_avg(b)", name="b")
@@ -227,7 +230,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
                     fig = plt.figure()
                     ax = fig.add_subplot(1,1,1)
                     ax.spy(solver.pencils[0].L, markersize=1, markeredgewidth=0.0)
-                    fig.savefig("sparsity_pattern.png", dpi=1200)
+                    fig.savefig(data_dir+"sparsity_pattern.png", dpi=1200)
+                    
                     import scipy.sparse.linalg as sla
                     LU = sla.splu(solver.pencils[0].LHS.tocsc(), permc_spec='NATURAL')
                     fig = plt.figure()
@@ -235,7 +239,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
                     ax.spy(LU.L.A, markersize=1, markeredgewidth=0.0)
                     ax = fig.add_subplot(1,2,2)
                     ax.spy(LU.U.A, markersize=1, markeredgewidth=0.0)
-                    fig.savefig("sparsity_pattern_LU.png", dpi=1200)
+                    fig.savefig(data_dir+"sparsity_pattern_LU.png", dpi=1200)
+                    
                     logger.info("{} nonzero entries in LU".format(LU.nnz))
                     logger.info("{} nonzero entries in LHS".format(solver.pencils[0].LHS.tocsc().nnz))
                     logger.info("{} fill in factor".format(LU.nnz/solver.pencils[0].LHS.tocsc().nnz))
@@ -293,6 +298,8 @@ if __name__ == "__main__":
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
-                    data_dir=data_dir, verbose=args['--verbose'])
+                    data_dir=data_dir,
+                    coeff_output=not(args['--no_coeffs']),
+                    verbose=args['--verbose'])
     
 
