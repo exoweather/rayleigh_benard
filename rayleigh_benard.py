@@ -67,7 +67,7 @@ def filter_field(field,frac=0.5):
         field_filter = field_filter | (cc[i][local_slice] > frac)
     field['c'][field_filter] = 0j
 
-def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None, data_dir='./'):
+def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=None, data_dir='./', verbose=False):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
             
@@ -283,6 +283,6 @@ if __name__ == "__main__":
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
-                    data_dir=data_dir, vebose=args['--verbose'])
+                    data_dir=data_dir, verbose=args['--verbose'])
     
 
