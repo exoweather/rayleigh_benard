@@ -133,12 +133,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     
     solver = problem.build_solver(ts)
     logger.info('Solver built')
-
-    import matplotlib.pyplot as plt
-    fig = plt.figure()
-    ax = fig.add_subplot(1,1,1)
-    ax.spy(solver.pencils[0].L, markersize=1, markeredgewidth=0.0)
-    fig.savefig("sparsity_pattern.png", dpi=1200)
         
     # Checkpointing
     if checkpointing:
@@ -217,7 +211,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
     # Main loop
     try:
         logger.info('Starting loop')
-        start_time = time.time()
         while solver.ok:
             dt = CFL.compute_dt()
             solver.step(dt) #, trim=True)
@@ -228,6 +221,13 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
             
             if first_step:
                 if verbose:
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    import matplotlib.pyplot as plt
+                    fig = plt.figure()
+                    ax = fig.add_subplot(1,1,1)
+                    ax.spy(solver.pencils[0].L, markersize=1, markeredgewidth=0.0)
+                    fig.savefig("sparsity_pattern.png", dpi=1200)
                     import scipy.sparse.linalg as sla
                     LU = sla.splu(solver.pencils[0].LHS.tocsc(), permc_spec='NATURAL')
                     fig = plt.figure()
@@ -240,15 +240,18 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
                     logger.info("{} nonzero entries in LHS".format(solver.pencils[0].LHS.tocsc().nnz))
                     logger.info("{} fill in factor".format(LU.nnz/solver.pencils[0].LHS.tocsc().nnz))
                 first_step=False
+                start_time = time.time()
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise
     finally:
         end_time = time.time()
-        logger.info('Iterations: %i' %solver.iteration)
-        logger.info('Sim end time: %f' %solver.sim_time)
-        logger.info('Run time: %.2f sec' %(end_time-start_time))
-        logger.info('Run time: %f cpu-hr' %((end_time-start_time)/60/60*domain.dist.comm_cart.size))
+        main_loop_time = end_time-start_time
+        logger.info('Iterations: {:d}'.format(solver.iteration))
+        logger.info('Sim end time: {:f}'.format(solver.sim_time))
+        logger.info('Run time: {:f} sec'.format(main_loop_time))
+        logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
+        logger.info('iter/sec: {:f}'.format((solver.iteration-1)/main_loop_time))
         
         logger.info('beginning join operation')
         if checkpointing:
@@ -258,7 +261,14 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4, restart=N
         for task in analysis_tasks:
             logger.info(task.base_path)
             post.merge_analysis(task.base_path)
-        
+
+        logger.info(40*"=")
+        logger.info('Iterations: {:d}'.format(solver.iteration))
+        logger.info('Sim end time: {:f}'.format(solver.sim_time))
+        logger.info('Run time: {:f} sec'.format(main_loop_time))
+        logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
+        logger.info('iter/sec: {:f}'.format((solver.iteration-1)/main_loop_time))
+
 if __name__ == "__main__":
     from docopt import docopt
     args = docopt(__doc__)
