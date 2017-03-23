@@ -244,12 +244,14 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     # Main loop
     try:
         logger.info('Starting loop')
-        while solver.ok:
+        Re_avg = 0
+        while solver.ok and np.isfinite(Re_avg):
             dt = CFL.compute_dt()
             solver.step(dt) #, trim=True)
+            Re_avg = flow.grid_average('Re')
             log_string =  'Iteration: {:5d}, '.format(solver.iteration)
             log_string += 'Time: {:8.3e}, dt: {:8.3e}, '.format(solver.sim_time, dt)
-            log_string += 'Re: {:8.3e}/{:8.3e}'.format(flow.grid_average('Re'), flow.max('Re'))
+            log_string += 'Re: {:8.3e}/{:8.3e}'.format(Re_avg, flow.max('Re'))
             logger.info(log_string)
             
             if first_step:
