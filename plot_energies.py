@@ -28,36 +28,40 @@ def plot_energies(data, times, output_path='./'):
     fig_energies = plt.figure(figsize=(16,8))
     ax1 = fig_energies.add_subplot(2,1,1)
     ax1.semilogy(t, data['KE'], label="KE")
-    #ax1.semilogy(t, data['PE'], label="PE")
     ax1.semilogy(t, data['IE'], label="IE")
     ax1.semilogy(t, data['TE'], label="TE")
     ax1.legend()
     
     ax2 = fig_energies.add_subplot(2,1,2)
     ax2.plot(t, data['KE'], label="KE")
-    #ax2.plot(t, data['PE'], label="PE")
     ax2.plot(t, data['IE'], label="IE")
     ax2.plot(t, data['TE'], label="TE")
     ax2.legend()
     figs["energies"]=fig_energies
 
-    fig_relative = plt.figure(figsize=(16,8))
-    ax1 = fig_relative.add_subplot(1,1,1)
-    ax1.plot(t, data['TE']/data['TE'][0]-1)
-    ax1.plot(t, data['IE']/data['IE'][0]-1)
-    #ax1.plot(t, data['PE']/data['PE'][0]-1)
-    figs["relative_energies"] = fig_relative
-
     fig_KE = plt.figure(figsize=(16,8))
     ax1 = fig_KE.add_subplot(1,1,1)
     ax1.plot(t, data['KE'], label="KE")
-    #ax1.plot(t, data['PE']-data['PE'][0], label="PE-PE$_0$")
     ax1.plot(t, data['IE']-data['IE'][0], label="IE-IE$_0$")
     ax1.plot(t, data['TE']-data['TE'][0], label="TE-TE$_0$", color='black')
     ax1.legend()
     ax1.set_xlabel("time")
     ax1.set_ylabel("energy")
     figs["fluctuating_energies"] = fig_KE
+
+    fig_KE_2 = plt.figure(figsize=(16,8))
+    ax1 = fig_KE_2.add_subplot(1,1,1)
+    ax1.plot(t, data['KE'], label="KE total")
+    ax1.plot(t, data['KE_fluc'], label="KE fluc")
+    ax1.plot(t, data['KE'] - data['KE_fluc'], label="KE mean")
+    ax1.plot(t, data['KE_x_fluc'], label=r"KE$_x$ fluc", linestyle='dashed')
+    ax1.plot(t, data['KE_z_fluc'], label=r"KE$_z$ fluc", linestyle='dashed')    
+    ax1.plot(t, data['IE']-data['IE'][0], label="IE-IE$_0$")
+    ax1.plot(t, data['TE']-data['TE'][0], label="TE-TE$_0$", color='black')
+    ax1.legend()
+    ax1.set_xlabel("time")
+    ax1.set_ylabel("energy")
+    figs["fluctuating_energies_breakdown"] = fig_KE_2
 
     fig_KE_only = plt.figure(figsize=(16,8))
     ax1 = fig_KE_only.add_subplot(2,1,1)
@@ -74,7 +78,6 @@ def plot_energies(data, times, output_path='./'):
     fig_log = plt.figure(figsize=(16,8))
     ax1 = fig_log.add_subplot(1,1,1)
     ax1.semilogy(t, data['KE'], label="KE")
-    #ax1.semilogy(t, np.abs(data['PE']-data['PE'][0]), label="|PE-PE$_0$|")
     ax1.semilogy(t, np.abs(data['IE']-data['IE'][0]), label="|IE-IE$_0$|")
     ax1.semilogy(t, np.abs(data['TE']-data['TE'][0]), label="|TE-TE$_0$|", color='black')
     ax1.set_xlabel("time")

@@ -269,8 +269,8 @@ class Image():
         # trimming method from Ben's ASH analysis package
         sorted_data = np.sort(data, axis=None)
         N_elements = len(sorted_data)
-        min_value = sorted_data[low_percent_cut*N_elements]
-        max_value = sorted_data[(1-high_percent_cut)*N_elements-1]
+        min_value = sorted_data[int(low_percent_cut*N_elements)]
+        max_value = sorted_data[int((1-high_percent_cut)*N_elements-1)]
         return min_value, max_value
 
     def set_scale(self, image_min, image_max):

@@ -101,9 +101,18 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
             os.mkdir('{:s}/'.format(data_dir))
 
     # 2D Boussinesq hydrodynamics
-    problem = de.IVP(domain, variables=['p','b','u','w','bz','uz','wz'])
-    problem.meta['p','b','uz','w']['z']['dirichlet'] = True
+    problem = de.IVP(domain, variables=['p','T','u','w','Tz','uz','wz'])
+    problem.meta['p','T','uz','w']['z']['dirichlet'] = True
 
+    T0_z = domain.new_field()
+    T0_z.meta['x']['constant'] = True
+    T0_z['g'] = -1
+    T0 = domain.new_field()
+    T0.meta['x']['constant'] = True
+    T0['g'] = Lz/2-domain.grid(-1)
+    problem.parameters['T0'] = T0
+    problem.parameters['T0_z'] = T0_z
+    
     problem.parameters['P'] = (Rayleigh * Prandtl)**(-1/2)
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
     problem.parameters['F'] = F = 1
@@ -131,20 +140,20 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         problem.substitutions['visc_heat']   = '0'
         problem.substitutions['visc_flux_z'] = '0'
         
-    problem.substitutions['conv_flux_z'] = '(w*b + visc_flux_z)/P'
-    problem.substitutions['kappa_flux_z'] = '(-bz)'
+    problem.substitutions['conv_flux_z'] = '(w*T + visc_flux_z)/P'
+    problem.substitutions['kappa_flux_z'] = '(-Tz)'
     
     problem.add_equation("dx(u) + wz = 0")
-    problem.add_equation("dt(b) - P*(dx(dx(b)) + dz(bz))             = -(u*dx(b) + w*bz)  - visc_heat")
+    problem.add_equation("dt(T) - P*(dx(dx(T)) + dz(Tz)) + w*T0_z    = -(u*dx(T) + w*Tz)  - visc_heat")
     problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     = -(u*dx(u) + w*uz)")
-    problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - b = -(u*dx(w) + w*wz)")
-    problem.add_equation("bz - dz(b) = 0")
+    problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - T = -(u*dx(w) + w*wz)")
+    problem.add_equation("Tz - dz(T) = 0")
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("wz - dz(w) = 0")
-    problem.add_bc("left(b) = left(-F*z)")
+    problem.add_bc("left(T)  = 0")
     problem.add_bc("left(uz) = 0")
-    problem.add_bc("left(w) = 0")
-    problem.add_bc("right(b) = right(-F*z)")
+    problem.add_bc("left(w)  = 0")
+    problem.add_bc("right(T) = 0")
     problem.add_bc("right(uz) = 0")
     problem.add_bc("right(w) = 0", condition="(nx != 0)")
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
@@ -164,8 +173,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     # Initial conditions
     x = domain.grid(0)
     z = domain.grid(1)
-    b = solver.state['b']
-    bz = solver.state['bz']
+    T = solver.state['T']
+    Tz = solver.state['Tz']
 
     # Random perturbations, initialized globally for same results in parallel
     noise = global_noise(domain, scale=1, frac=0.25)
@@ -174,8 +183,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         # Linear background + perturbations damped at walls
         zb, zt = z_basis.interval
         pert =  1e-3 * noise * (zt - z) * (z - zb)
-        b['g'] = -F*(z - pert)
-        b.differentiate('z', out=bz)
+        T['g'] = pert
+        T.differentiate('z', out=Tz)
     else:
         logger.info("restarting from {}".format(restart))
         checkpoint.restart(restart, solver)
@@ -188,16 +197,16 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     # Analysis
     analysis_tasks = []
     snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=10)
-    snapshots.add_task("b")
-    snapshots.add_task("b - plane_avg(b)", name="b'")
+    snapshots.add_task("T+T0", name='T')
+    snapshots.add_task("T - plane_avg(T)", name="T'")
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
 
     if coeff_output:
         coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
-        coeffs.add_task("b", layout='c')
-        coeffs.add_task("b - plane_avg(b)", name="b'", layout='c')
+        coeffs.add_task("T+T0", name="T", layout='c')
+        coeffs.add_task("T - plane_avg(T)", name="T'", layout='c')
         coeffs.add_task("w", layout='c')
         coeffs.add_task("u", layout='c')
         coeffs.add_task("enstrophy", layout='c')
@@ -205,7 +214,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         analysis_tasks.append(coeffs)
 
     profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
-    profiles.add_task("plane_avg(b)", name="b")
+    profiles.add_task("plane_avg(T+T0)", name="T")
+    profiles.add_task("plane_avg(T)", name="T'")
     profiles.add_task("plane_avg(u)", name="u")
     profiles.add_task("plane_avg(enstrophy)", name="enstrophy")
     # This may have an error:
@@ -215,9 +225,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     analysis_tasks.append(profiles)
 
     scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
-    scalar.add_task("vol_avg(b)", name="IE")
+    scalar.add_task("vol_avg(T)", name="IE")
     scalar.add_task("vol_avg(KE)", name="KE")
-    scalar.add_task("vol_avg(b) + vol_avg(KE)", name="TE")
+    scalar.add_task("vol_avg(T) + vol_avg(KE)", name="TE")
     scalar.add_task("0.5*vol_avg(u_fluc*u_fluc+w_fluc*w_fluc)", name="KE_fluc")
     scalar.add_task("0.5*vol_avg(u*u)", name="KE_x")
     scalar.add_task("0.5*vol_avg(w*w)", name="KE_z")
@@ -227,9 +237,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     scalar.add_task("vol_avg((u - plane_avg(u))**2)", name="u1")
     scalar.add_task("vol_avg(conv_flux_z) + 1.", name="Nu")
     analysis_tasks.append(scalar)
-
-    # workaround for issue #29
-    problem.namespace['enstrophy'].store_last = True
 
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
