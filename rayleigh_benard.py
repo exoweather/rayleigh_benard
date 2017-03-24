@@ -15,6 +15,8 @@ Options:
     --aspect=<aspect>          Aspect ratio of problem [default: 4]
     --viscous_heating          Include viscous heating
 
+    --fixed_flux               Fixed flux boundary conditions top/bottom
+    --fixed_T                  Fixed temperature boundary conditions top/bottom; default if no choice is made
     
     --run_time=<run_time>             Run time, in hours [default: 23.5]
     --run_time_buoy=<run_time_bouy>   Run time, in buoyancy times [default: 50]
@@ -76,6 +78,7 @@ def filter_field(field,frac=0.5):
     field['c'][field_filter] = 0j
 
 def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
+                    fixed_flux=False, fixed_T=True,
                     viscous_heating=False, restart=None,
                     run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
                     data_dir='./', coeff_output=True, verbose=False):
@@ -100,9 +103,14 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         if not os.path.exists('{:s}/'.format(data_dir)):
             os.mkdir('{:s}/'.format(data_dir))
 
+    if fixed_flux:
+        T_bc_var = 'Tz'
+    elif fixed_T:
+        T_bc_var = 'T'
+                
     # 2D Boussinesq hydrodynamics
-    problem = de.IVP(domain, variables=['p','T','u','w','Tz','uz','wz'])
-    problem.meta['p','T','uz','w']['z']['dirichlet'] = True
+    problem = de.IVP(domain, variables=['Tz','T','p','u','uz','w','wz'])
+    problem.meta['p',T_bc_var,'uz','w']['z']['dirichlet'] = True
 
     T0_z = domain.new_field()
     T0_z.meta['x']['constant'] = True
@@ -143,20 +151,24 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.substitutions['conv_flux_z'] = '(w*T + visc_flux_z)/P'
     problem.substitutions['kappa_flux_z'] = '(-Tz)'
     
-    problem.add_equation("dx(u) + wz = 0")
+    problem.add_equation("Tz - dz(T) = 0")
     problem.add_equation("dt(T) - P*(dx(dx(T)) + dz(Tz)) + w*T0_z    = -(u*dx(T) + w*Tz)  - visc_heat")
     problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     = -(u*dx(u) + w*uz)")
     problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - T = -(u*dx(w) + w*wz)")
-    problem.add_equation("Tz - dz(T) = 0")
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("wz - dz(w) = 0")
-    problem.add_bc("left(T)  = 0")
-    problem.add_bc("left(uz) = 0")
-    problem.add_bc("left(w)  = 0")
-    problem.add_bc("right(T) = 0")
-    problem.add_bc("right(uz) = 0")
-    problem.add_bc("right(w) = 0", condition="(nx != 0)")
+    problem.add_equation("dx(u) + wz = 0")
     problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
+    if fixed_flux:
+        problem.add_bc("left(Tz)  = 0")
+        problem.add_bc("right(Tz) = 0")
+    elif fixed_T:
+        problem.add_bc("left(T)  = 0")
+        problem.add_bc("right(T) = 0")
+    problem.add_bc("left(uz) = 0")
+    problem.add_bc("right(uz) = 0")
+    problem.add_bc("left(w)  = 0")
+    problem.add_bc("right(w) = 0", condition="(nx != 0)")
 
     # Build solver
     ts = de.timesteppers.RK443
@@ -330,8 +342,16 @@ if __name__ == "__main__":
     from numpy import inf as np_inf
     
     import sys
+
+    fixed_flux = args['--fixed_flux']
+    fixed_T = args['--fixed_T']
+    if not fixed_flux:
+        fixed_T = True
+
     # save data in directory named after script
     data_dir = sys.argv[0].split('.py')[0]
+    if fixed_flux:
+        data_dir += '_flux'
     if args['--viscous_heating']:
         data_dir += '_visc'
     data_dir += "_Ra{}_Pr{}_a{}".format(args['--Rayleigh'], args['--Prandtl'], args['--aspect'])
@@ -348,7 +368,7 @@ if __name__ == "__main__":
     if args['--run_time_iter'] is not None:
         run_time_iter = int(float(args['--run_time_iter']))
     else:
-        run_time_iter = np_inf
+        run_time_iter = np_inf        
         
     Rayleigh_Benard(Rayleigh=float(args['--Rayleigh']),
                     Prandtl=float(args['--Prandtl']),
@@ -356,6 +376,7 @@ if __name__ == "__main__":
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
+                    fixed_flux=fixed_flux, fixed_T=fixed_T,
                     viscous_heating=args['--viscous_heating'],
                     run_time=float(args['--run_time']),
                     run_time_buoyancy=float(args['--run_time_buoy']),
