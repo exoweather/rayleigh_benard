@@ -158,7 +158,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("wz - dz(w) = 0")
     problem.add_equation("dx(u) + wz = 0")
-    problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
+    problem.add_bc("left(p) = 0", condition="(nx == 0)")
     if fixed_flux:
         problem.add_bc("left(Tz)  = 0")
         problem.add_bc("right(Tz) = 0")
