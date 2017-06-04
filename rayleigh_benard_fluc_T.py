@@ -15,8 +15,6 @@ Options:
     --aspect=<aspect>          Aspect ratio of problem [default: 4]
     --viscous_heating          Include viscous heating
 
-    --fixed_flux               Fixed flux boundary conditions top/bottom
-    --fixed_T                  Fixed temperature boundary conditions top/bottom; default if no choice is made
     
     --run_time=<run_time>             Run time, in hours [default: 23.5]
     --run_time_buoy=<run_time_bouy>   Run time, in buoyancy times [default: 50]
@@ -78,7 +76,6 @@ def filter_field(field,frac=0.5):
     field['c'][field_filter] = 0j
 
 def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
-                    fixed_flux=False, fixed_T=True,
                     viscous_heating=False, restart=None,
                     run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
                     data_dir='./', coeff_output=True, verbose=False):
@@ -103,24 +100,10 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         if not os.path.exists('{:s}/'.format(data_dir)):
             os.mkdir('{:s}/'.format(data_dir))
 
-    if fixed_flux:
-        T_bc_var = 'Tz'
-    elif fixed_T:
-        T_bc_var = 'T'
-                
     # 2D Boussinesq hydrodynamics
-    problem = de.IVP(domain, variables=['Tz','T','p','u','uz','w','wz'])
-    problem.meta['p',T_bc_var,'uz','w']['z']['dirichlet'] = True
+    problem = de.IVP(domain, variables=['p','b','u','w','bz','uz','wz'])
+    problem.meta['p','b','uz','w']['z']['dirichlet'] = True
 
-    T0_z = domain.new_field()
-    T0_z.meta['x']['constant'] = True
-    T0_z['g'] = -1
-    T0 = domain.new_field()
-    T0.meta['x']['constant'] = True
-    T0['g'] = Lz/2-domain.grid(-1)
-    problem.parameters['T0'] = T0
-    problem.parameters['T0_z'] = T0_z
-    
     problem.parameters['P'] = (Rayleigh * Prandtl)**(-1/2)
     problem.parameters['R'] = (Rayleigh / Prandtl)**(-1/2)
     problem.parameters['F'] = F = 1
@@ -129,9 +112,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.parameters['Lz'] = Lz
     problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
     problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
-
+    
+    problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
     problem.substitutions['vorticity'] = '(dx(w) - uz)' 
-    problem.substitutions['enstrophy'] = 'vorticity**2'
 
     problem.substitutions['u_fluc'] = '(u - plane_avg(u))'
     problem.substitutions['w_fluc'] = '(w - plane_avg(w))'
@@ -142,33 +125,29 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.substitutions['sigma_zz'] = '(2*wz)'
 
     if viscous_heating:
-        problem.substitutions['visc_heat']   = 'R*(sigma_xz**2 + sigma_xx*dx(u) + sigma_zz*wz)'
+        problem.substitutions['visc_heat']   = 'R*((sigma_xz)*(dx(w)+uz) + (sigma_xx)*dx(u) + (sigma_zz)*wz)'
         problem.substitutions['visc_flux_z'] = 'R*(u*sigma_xz + w*sigma_zz)'
     else:
         problem.substitutions['visc_heat']   = '0'
         problem.substitutions['visc_flux_z'] = '0'
         
-    problem.substitutions['conv_flux_z'] = '(w*T + visc_flux_z)/P'
-    problem.substitutions['kappa_flux_z'] = '(-Tz)'
+    problem.substitutions['conv_flux_z'] = '(w*b + visc_flux_z)/P'
+    problem.substitutions['kappa_flux_z'] = '(-bz)'
     
-    problem.add_equation("Tz - dz(T) = 0")
-    problem.add_equation("dt(T) - P*(dx(dx(T)) + dz(Tz)) + w*T0_z    = -(u*dx(T) + w*Tz)  - visc_heat")
+    problem.add_equation("dx(u) + wz = 0")
+    problem.add_equation("dt(b) - P*(dx(dx(b)) + dz(bz)) - w         = -(u*dx(b) + w*bz)  - visc_heat")
     problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     = -(u*dx(u) + w*uz)")
-    problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - T = -(u*dx(w) + w*wz)")
+    problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - b = -(u*dx(w) + w*wz)")
+    problem.add_equation("bz - dz(b) = 0")
     problem.add_equation("uz - dz(u) = 0")
     problem.add_equation("wz - dz(w) = 0")
-    problem.add_equation("dx(u) + wz = 0")
-    problem.add_bc("left(p) = 0", condition="(nx == 0)")
-    if fixed_flux:
-        problem.add_bc("left(Tz)  = 0")
-        problem.add_bc("right(Tz) = 0")
-    elif fixed_T:
-        problem.add_bc("left(T)  = 0")
-        problem.add_bc("right(T) = 0")
+    problem.add_bc("left(b)  = 0")
     problem.add_bc("left(uz) = 0")
-    problem.add_bc("right(uz) = 0")
     problem.add_bc("left(w)  = 0")
+    problem.add_bc("right(b) = 0")
+    problem.add_bc("right(uz) = 0")
     problem.add_bc("right(w) = 0", condition="(nx != 0)")
+    problem.add_bc("integ(p, 'z') = 0", condition="(nx == 0)")
 
     # Build solver
     ts = de.timesteppers.RK443
@@ -185,8 +164,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     # Initial conditions
     x = domain.grid(0)
     z = domain.grid(1)
-    T = solver.state['T']
-    Tz = solver.state['Tz']
+    b = solver.state['b']
+    bz = solver.state['bz']
 
     # Random perturbations, initialized globally for same results in parallel
     noise = global_noise(domain, scale=1, frac=0.25)
@@ -195,8 +174,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         # Linear background + perturbations damped at walls
         zb, zt = z_basis.interval
         pert =  1e-3 * noise * (zt - z) * (z - zb)
-        T['g'] = pert
-        T.differentiate('z', out=Tz)
+        b['g'] = pert
+        b.differentiate('z', out=bz)
     else:
         logger.info("restarting from {}".format(restart))
         checkpoint.restart(restart, solver)
@@ -209,16 +188,16 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     # Analysis
     analysis_tasks = []
     snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=10)
-    snapshots.add_task("T+T0", name='T')
-    snapshots.add_task("T - plane_avg(T)", name="T'")
+    snapshots.add_task("b")
+    snapshots.add_task("b - plane_avg(b)", name="b'")
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
 
     if coeff_output:
         coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
-        coeffs.add_task("T+T0", name="T", layout='c')
-        coeffs.add_task("T - plane_avg(T)", name="T'", layout='c')
+        coeffs.add_task("b", layout='c')
+        coeffs.add_task("b - plane_avg(b)", name="b'", layout='c')
         coeffs.add_task("w", layout='c')
         coeffs.add_task("u", layout='c')
         coeffs.add_task("enstrophy", layout='c')
@@ -226,8 +205,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         analysis_tasks.append(coeffs)
 
     profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
-    profiles.add_task("plane_avg(T+T0)", name="T")
-    profiles.add_task("plane_avg(T)", name="T'")
+    profiles.add_task("plane_avg(b)", name="b")
     profiles.add_task("plane_avg(u)", name="u")
     profiles.add_task("plane_avg(enstrophy)", name="enstrophy")
     # This may have an error:
@@ -237,9 +215,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     analysis_tasks.append(profiles)
 
     scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
-    scalar.add_task("vol_avg(T)", name="IE")
+    scalar.add_task("vol_avg(b)", name="IE")
     scalar.add_task("vol_avg(KE)", name="KE")
-    scalar.add_task("vol_avg(T) + vol_avg(KE)", name="TE")
+    scalar.add_task("vol_avg(b) + vol_avg(KE)", name="TE")
     scalar.add_task("0.5*vol_avg(u_fluc*u_fluc+w_fluc*w_fluc)", name="KE_fluc")
     scalar.add_task("0.5*vol_avg(u*u)", name="KE_x")
     scalar.add_task("0.5*vol_avg(w*w)", name="KE_z")
@@ -249,6 +227,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     scalar.add_task("vol_avg((u - plane_avg(u))**2)", name="u1")
     scalar.add_task("vol_avg(conv_flux_z) + 1.", name="Nu")
     analysis_tasks.append(scalar)
+
+    # workaround for issue #29
+    problem.namespace['enstrophy'].store_last = True
 
     # CFL
     CFL = flow_tools.CFL(solver, initial_dt=0.1, cadence=1, safety=cfl_safety,
@@ -342,16 +323,8 @@ if __name__ == "__main__":
     from numpy import inf as np_inf
     
     import sys
-
-    fixed_flux = args['--fixed_flux']
-    fixed_T = args['--fixed_T']
-    if not fixed_flux:
-        fixed_T = True
-
     # save data in directory named after script
     data_dir = sys.argv[0].split('.py')[0]
-    if fixed_flux:
-        data_dir += '_flux'
     if args['--viscous_heating']:
         data_dir += '_visc'
     data_dir += "_Ra{}_Pr{}_a{}".format(args['--Rayleigh'], args['--Prandtl'], args['--aspect'])
@@ -368,7 +341,7 @@ if __name__ == "__main__":
     if args['--run_time_iter'] is not None:
         run_time_iter = int(float(args['--run_time_iter']))
     else:
-        run_time_iter = np_inf        
+        run_time_iter = np_inf
         
     Rayleigh_Benard(Rayleigh=float(args['--Rayleigh']),
                     Prandtl=float(args['--Prandtl']),
@@ -376,7 +349,6 @@ if __name__ == "__main__":
                     aspect=int(args['--aspect']),
                     nz=int(args['--nz']),
                     nx=nx,
-                    fixed_flux=fixed_flux, fixed_T=fixed_T,
                     viscous_heating=args['--viscous_heating'],
                     run_time=float(args['--run_time']),
                     run_time_buoyancy=float(args['--run_time_buoy']),

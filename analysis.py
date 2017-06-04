@@ -11,7 +11,7 @@ class DedalusData():
                  keys=None, verbose=False, **kwargs):
         
         self.verbose = verbose
-        self.files = sorted(files, key=lambda x: int(x.split('.h5')[0].split('_s')[1]))
+        self.files = sorted(files, key=lambda x: int(x.split('.h5')[0].split('_s')[-1]))
         logger.debug("opening: {}".format(self.files))
         
         if keys is None:
@@ -137,8 +137,12 @@ class Slice(DedalusData):
                     self.data[key] = np.append(self.data[key], f['tasks'][key][:], axis=0)
 
             N += 1
-            self.x = f['scales']['x']['1.0'][:]
-            self.z = f['scales']['z']['1.0'][:]
+            try:
+                self.x = f['scales']['x']['1.0'][:]
+                self.z = f['scales']['z']['1.0'][:]
+            except:
+                self.x = f['scales']['x']['0.25'][:]
+                self.z = f['scales']['z']['0.25'][:]
 
             self.times = np.append(self.times, f['scales']['sim_time'][:])
             self.writes = np.append(self.writes, f['scales']['write_number'][:])

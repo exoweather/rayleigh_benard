@@ -27,6 +27,7 @@ Options:
     --label=<label>            Optional additional case name label
     --verbose                  Do verbose output (e.g., sparsity patterns of arrays)
     --no_coeffs                If flagged, coeffs will not be output   
+    --no_join                  If flagged, don't join files at end of run
 """
 import logging
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
                     fixed_flux=False, fixed_T=True,
                     viscous_heating=False, restart=None,
                     run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
-                    data_dir='./', coeff_output=True, verbose=False):
+                    data_dir='./', coeff_output=True, verbose=False, no_join=False):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
             
@@ -109,8 +110,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         T_bc_var = 'T'
                 
     # 2D Boussinesq hydrodynamics
-    problem = de.IVP(domain, variables=['Tz','T','p','u','uz','w','wz'])
-    problem.meta['p',T_bc_var,'uz','w']['z']['dirichlet'] = True
+    problem = de.IVP(domain, variables=['Tz','T','p','u','w','Oy'])
+    problem.meta['p',T_bc_var,'Oy','w']['z']['dirichlet'] = True
 
     T0_z = domain.new_field()
     T0_z.meta['x']['constant'] = True
@@ -129,20 +130,27 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.parameters['Lz'] = Lz
     problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
     problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
-
-    problem.substitutions['vorticity'] = '(dx(w) - uz)' 
-    problem.substitutions['enstrophy'] = 'vorticity**2'
+    
+    problem.substitutions['v'] = '0'
+    problem.substitutions['Ox'] = '0'
+    problem.substitutions['Oz'] = '(dx(v) )'
+    problem.substitutions['Kx'] = '( -dz(Oy))'
+    problem.substitutions['Ky'] = '(dz(Ox) - dx(Oz))'
+    problem.substitutions['Kz'] = '(dx(Oy) )'
+    
+    problem.substitutions['vorticity'] = 'Oy' 
+    problem.substitutions['enstrophy'] = 'Oy**2'
 
     problem.substitutions['u_fluc'] = '(u - plane_avg(u))'
     problem.substitutions['w_fluc'] = '(w - plane_avg(w))'
     problem.substitutions['KE'] = '(0.5*(u*u+w*w))'
     
-    problem.substitutions['sigma_xz'] = '(dx(w) + uz)'
+    problem.substitutions['sigma_xz'] = '(dx(w) + Oy + dx(w))'
     problem.substitutions['sigma_xx'] = '(2*dx(u))'
-    problem.substitutions['sigma_zz'] = '(2*wz)'
+    problem.substitutions['sigma_zz'] = '(2*dz(w))'
 
     if viscous_heating:
-        problem.substitutions['visc_heat']   = 'R*(sigma_xz**2 + sigma_xx*dx(u) + sigma_zz*wz)'
+        problem.substitutions['visc_heat']   = 'R*(sigma_xz**2 + sigma_xx*dx(u) + sigma_zz*dz(w))'
         problem.substitutions['visc_flux_z'] = 'R*(u*sigma_xz + w*sigma_zz)'
     else:
         problem.substitutions['visc_heat']   = '0'
@@ -150,14 +158,16 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         
     problem.substitutions['conv_flux_z'] = '(w*T + visc_flux_z)/P'
     problem.substitutions['kappa_flux_z'] = '(-Tz)'
+
     
     problem.add_equation("Tz - dz(T) = 0")
     problem.add_equation("dt(T) - P*(dx(dx(T)) + dz(Tz)) + w*T0_z    = -(u*dx(T) + w*Tz)  - visc_heat")
-    problem.add_equation("dt(u) - R*(dx(dx(u)) + dz(uz)) + dx(p)     = -(u*dx(u) + w*uz)")
-    problem.add_equation("dt(w) - R*(dx(dx(w)) + dz(wz)) + dz(p) - T = -(u*dx(w) + w*wz)")
-    problem.add_equation("uz - dz(u) = 0")
-    problem.add_equation("wz - dz(w) = 0")
-    problem.add_equation("dx(u) + wz = 0")
+    # O == omega = curl(u);  K = curl(O)
+    problem.add_equation("dt(u)  + R*Kx  + dx(p)              =  v*Oz - w*Oy ")
+    problem.add_equation("dt(w)  + R*Kz  + dz(p)    -T        =  u*Oy - v*Ox ")
+    problem.add_equation("dx(u) + dz(w) = 0")
+    problem.add_equation("Oy - dz(u) + dx(w) = 0")
+    
     problem.add_bc("left(p) = 0", condition="(nx == 0)")
     if fixed_flux:
         problem.add_bc("left(Tz)  = 0")
@@ -165,8 +175,8 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     elif fixed_T:
         problem.add_bc("left(T)  = 0")
         problem.add_bc("right(T) = 0")
-    problem.add_bc("left(uz) = 0")
-    problem.add_bc("right(uz) = 0")
+    problem.add_bc("left(Oy+dx(w)) = 0")
+    problem.add_bc("right(Oy+dx(w)) = 0")
     problem.add_bc("left(w)  = 0")
     problem.add_bc("right(w) = 0", condition="(nx != 0)")
 
@@ -208,12 +218,21 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
 
     # Analysis
     analysis_tasks = []
-    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=10)
+    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=1)
     snapshots.add_task("T+T0", name='T')
-    snapshots.add_task("T - plane_avg(T)", name="T'")
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
+
+    snapshots_T = solver.evaluator.add_file_handler(data_dir+'slices_T', sim_dt=0.1, max_writes=1)
+    snapshots_T.add_task("T+T0", name='T')
+    analysis_tasks.append(snapshots_T)
+
+    snapshots_small = solver.evaluator.add_file_handler(data_dir+'slices_small', sim_dt=0.1, max_writes=1)
+    snapshots_small.add_task("T+T0", name='T', scales=0.25)
+    snapshots_small.add_task("enstrophy", scales=0.25)
+    snapshots_small.add_task("vorticity", scales=0.25)
+    analysis_tasks.append(snapshots_small)
 
     if coeff_output:
         coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
@@ -310,23 +329,24 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
         logger.info('iter/sec: {:f} (main loop only)'.format(n_iter_loop/main_loop_time))
         
-        logger.info('beginning join operation')
-        if checkpointing:
-            try:
-                final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
-                final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
-                solver.step(dt) #clean this up in the future...works for now.
-                logger.info(data_dir+'/final_checkpoint/')
-                post.merge_analysis(data_dir+'/final_checkpoint/')
-            except:
-                print('cannot save final checkpoint')
+        if not no_join:
+            logger.info('beginning join operation')
+            if checkpointing:
+                try:
+                    final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
+                    final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
+                    solver.step(dt) #clean this up in the future...works for now.
+                    logger.info(data_dir+'/final_checkpoint/')
+                    post.merge_analysis(data_dir+'/final_checkpoint/')
+                except:
+                    print('cannot save final checkpoint')
 
-            logger.info(data_dir+'/checkpoint/')
-            post.merge_analysis(data_dir+'/checkpoint/')
+                logger.info(data_dir+'/checkpoint/')
+                post.merge_analysis(data_dir+'/checkpoint/')
 
-        for task in analysis_tasks:
-            logger.info(task.base_path)
-            post.merge_analysis(task.base_path)
+            for task in analysis_tasks:
+                logger.info(task.base_path)
+                post.merge_analysis(task.base_path)
 
         logger.info(40*"=")
         logger.info('Iterations: {:d}'.format(n_iter_loop))
@@ -383,6 +403,7 @@ if __name__ == "__main__":
                     run_time_iter=run_time_iter,
                     data_dir=data_dir,
                     coeff_output=not(args['--no_coeffs']),
-                    verbose=args['--verbose'])
+                    verbose=args['--verbose'],
+                    no_join=args['--no_join'])
     
 
