@@ -39,12 +39,6 @@ import time
 from dedalus import public as de
 from dedalus.extras import flow_tools
 from dedalus.tools  import post
-try:
-    from dedalus.extras.checkpointing import Checkpoint
-    checkpointing = True
-except:
-    logger.info("No checkpointing available; disabling capability")
-    checkpointing = False
     
 def global_noise(domain, seed=42, scale=None, **kwargs):            
     # Random perturbations, initialized globally for same results in parallel
@@ -167,16 +161,16 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.add_equation("dt(w)  + R*Kz  + dz(p)    -T        =  u*Oy - v*Ox ")
     problem.add_equation("dx(u) + dz(w) = 0")
     problem.add_equation("Oy - dz(u) + dx(w) = 0")
-    
-    problem.add_bc("left(p) = 0", condition="(nx == 0)")
+
+    problem.add_bc("right(p) = 0", condition="(nx == 0)")
     if fixed_flux:
         problem.add_bc("left(Tz)  = 0")
         problem.add_bc("right(Tz) = 0")
     elif fixed_T:
         problem.add_bc("left(T)  = 0")
         problem.add_bc("right(T) = 0")
-    problem.add_bc("left(Oy+dx(w)) = 0")
-    problem.add_bc("right(Oy+dx(w)) = 0")
+    problem.add_bc("left(Oy) = 0")
+    problem.add_bc("right(Oy) = 0")
     problem.add_bc("left(w)  = 0")
     problem.add_bc("right(w) = 0", condition="(nx != 0)")
 
@@ -187,10 +181,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     solver = problem.build_solver(ts)
     logger.info('Solver built')
         
-    # Checkpointing
-    if checkpointing:
-        checkpoint = Checkpoint(data_dir)
-        checkpoint.set_checkpoint(solver, wall_dt=1800)
+    checkpoint = solver.evaluator.add_file_handler(wall_dt=8*3600, max_writes=1)
+    checkpoint.add_system(solver.state, layout='c')
+
     
     # Initial conditions
     x = domain.grid(0)
@@ -209,7 +202,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         T.differentiate('z', out=Tz)
     else:
         logger.info("restarting from {}".format(restart))
-        checkpoint.restart(restart, solver)
+        write, dt = solver.load_state(checkpoint_file, cp_record)
         
     # Integration parameters
     solver.stop_sim_time  = run_time_buoyancy
@@ -223,10 +216,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
-
-    snapshots_T = solver.evaluator.add_file_handler(data_dir+'slices_T', sim_dt=0.1, max_writes=1)
-    snapshots_T.add_task("T+T0", name='T')
-    analysis_tasks.append(snapshots_T)
 
     snapshots_small = solver.evaluator.add_file_handler(data_dir+'slices_small', sim_dt=0.1, max_writes=1)
     snapshots_small.add_task("T+T0", name='T', scales=0.25)
@@ -329,20 +318,17 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
         logger.info('iter/sec: {:f} (main loop only)'.format(n_iter_loop/main_loop_time))
         
+        final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
+        final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
+        solver.step(dt) #clean this up in the future...works for now.
+        logger.info(data_dir+'/final_checkpoint/')
+        
         if not no_join:
             logger.info('beginning join operation')
-            if checkpointing:
-                try:
-                    final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
-                    final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
-                    solver.step(dt) #clean this up in the future...works for now.
-                    logger.info(data_dir+'/final_checkpoint/')
-                    post.merge_analysis(data_dir+'/final_checkpoint/')
-                except:
-                    print('cannot save final checkpoint')
+            post.merge_analysis(data_dir+'/final_checkpoint/')
 
-                logger.info(data_dir+'/checkpoint/')
-                post.merge_analysis(data_dir+'/checkpoint/')
+            logger.info(data_dir+'/checkpoint/')
+            post.merge_analysis(data_dir+'/checkpoint/')
 
             for task in analysis_tasks:
                 logger.info(task.base_path)
