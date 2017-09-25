@@ -24,6 +24,9 @@ Options:
 
     --restart=<restart_file>   Restart from checkpoint
 
+    --max_writes=<max_writes>              Writes per file for files other than slices and coeffs [default: 10]
+    --max_slice_writes=<max_slice_writes>  Writes per file for slices and coeffs [default: 10]
+    
     --label=<label>            Optional additional case name label
     --verbose                  Do verbose output (e.g., sparsity patterns of arrays)
     --no_coeffs                If flagged, coeffs will not be output   
@@ -76,6 +79,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
                     fixed_flux=False, fixed_T=True,
                     viscous_heating=False, restart=None,
                     run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
+                    max_writes=10, max_slice_writes=10,
                     data_dir='./', coeff_output=True, verbose=False, no_join=False):
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
@@ -181,7 +185,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     solver = problem.build_solver(ts)
     logger.info('Solver built')
         
-    checkpoint = solver.evaluator.add_file_handler(wall_dt=8*3600, max_writes=1)
+    checkpoint = solver.evaluator.add_file_handler(data_dir+'checkpoints', wall_dt=8*3600, max_writes=1)
     checkpoint.add_system(solver.state, layout='c')
 
     
@@ -211,20 +215,20 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
 
     # Analysis
     analysis_tasks = []
-    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=1)
+    snapshots = solver.evaluator.add_file_handler(data_dir+'slices', sim_dt=0.1, max_writes=max_slice_writes)
     snapshots.add_task("T+T0", name='T')
     snapshots.add_task("enstrophy")
     snapshots.add_task("vorticity")
     analysis_tasks.append(snapshots)
 
-    snapshots_small = solver.evaluator.add_file_handler(data_dir+'slices_small', sim_dt=0.1, max_writes=1)
+    snapshots_small = solver.evaluator.add_file_handler(data_dir+'slices_small', sim_dt=0.1, max_writes=max_slice_writes)
     snapshots_small.add_task("T+T0", name='T', scales=0.25)
     snapshots_small.add_task("enstrophy", scales=0.25)
     snapshots_small.add_task("vorticity", scales=0.25)
     analysis_tasks.append(snapshots_small)
 
     if coeff_output:
-        coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=10)
+        coeffs = solver.evaluator.add_file_handler(data_dir+'coeffs', sim_dt=0.1, max_writes=max_slice_writes)
         coeffs.add_task("T+T0", name="T", layout='c')
         coeffs.add_task("T - plane_avg(T)", name="T'", layout='c')
         coeffs.add_task("w", layout='c')
@@ -233,7 +237,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         coeffs.add_task("vorticity", layout='c')
         analysis_tasks.append(coeffs)
 
-    profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=10)
+    profiles = solver.evaluator.add_file_handler(data_dir+'profiles', sim_dt=0.1, max_writes=max_writes)
     profiles.add_task("plane_avg(T+T0)", name="T")
     profiles.add_task("plane_avg(T)", name="T'")
     profiles.add_task("plane_avg(u)", name="u")
@@ -244,7 +248,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
 
     analysis_tasks.append(profiles)
 
-    scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=10)
+    scalar = solver.evaluator.add_file_handler(data_dir+'scalar', sim_dt=0.1, max_writes=max_writes)
     scalar.add_task("vol_avg(T)", name="IE")
     scalar.add_task("vol_avg(KE)", name="KE")
     scalar.add_task("vol_avg(T) + vol_avg(KE)", name="TE")
@@ -317,18 +321,15 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
         logger.info('Run time: {:f} sec'.format(main_loop_time))
         logger.info('Run time: {:f} cpu-hr'.format(main_loop_time/60/60*domain.dist.comm_cart.size))
         logger.info('iter/sec: {:f} (main loop only)'.format(n_iter_loop/main_loop_time))
-        
-        final_checkpoint = Checkpoint(data_dir, checkpoint_name='final_checkpoint')
-        final_checkpoint.set_checkpoint(solver, wall_dt=1, write_num=1, set_num=1)
+
+        final_checkpoint = solver.evaluator.add_file_handler(data_dir+'final_checkpoint', iter=1)
+        final_checkpoint.add_system(solver.state, layout='c')
         solver.step(dt) #clean this up in the future...works for now.
-        logger.info(data_dir+'/final_checkpoint/')
+        post.merge_analysis(data_dir+'final_checkpoint')
         
         if not no_join:
             logger.info('beginning join operation')
-            post.merge_analysis(data_dir+'/final_checkpoint/')
-
-            logger.info(data_dir+'/checkpoint/')
-            post.merge_analysis(data_dir+'/checkpoint/')
+            post.merge_analysis(data_dir+'checkpoints')
 
             for task in analysis_tasks:
                 logger.info(task.base_path)
@@ -388,6 +389,8 @@ if __name__ == "__main__":
                     run_time_buoyancy=float(args['--run_time_buoy']),
                     run_time_iter=run_time_iter,
                     data_dir=data_dir,
+                    max_writes=int(args['--max_writes']),
+                    max_slice_writes=int(args['--max_slice_writes']),
                     coeff_output=not(args['--no_coeffs']),
                     verbose=args['--verbose'],
                     no_join=args['--no_join'])
