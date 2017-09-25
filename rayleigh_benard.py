@@ -129,9 +129,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.parameters['Lz'] = Lz
     problem.substitutions['plane_avg(A)'] = 'integ(A, "x")/Lx'
     problem.substitutions['vol_avg(A)']   = 'integ(A)/Lx/Lz'
-    
-    problem.substitutions['enstrophy'] = '(dx(w) - uz)**2'
+
     problem.substitutions['vorticity'] = '(dx(w) - uz)' 
+    problem.substitutions['enstrophy'] = 'vorticity**2'
 
     problem.substitutions['u_fluc'] = '(u - plane_avg(u))'
     problem.substitutions['w_fluc'] = '(w - plane_avg(w))'
@@ -142,7 +142,7 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     problem.substitutions['sigma_zz'] = '(2*wz)'
 
     if viscous_heating:
-        problem.substitutions['visc_heat']   = 'R*((sigma_xz)*(dx(w)+uz) + (sigma_xx)*dx(u) + (sigma_zz)*wz)'
+        problem.substitutions['visc_heat']   = 'R*(sigma_xz**2 + sigma_xx*dx(u) + sigma_zz*wz)'
         problem.substitutions['visc_flux_z'] = 'R*(u*sigma_xz + w*sigma_zz)'
     else:
         problem.substitutions['visc_heat']   = '0'
