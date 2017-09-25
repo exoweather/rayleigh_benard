@@ -32,17 +32,8 @@ Options:
     --no_coeffs                If flagged, coeffs will not be output   
     --no_join                  If flagged, don't join files at end of run
 """
-import logging
-logger = logging.getLogger(__name__)
-
 import numpy as np
-from mpi4py import MPI
-import time
 
-from dedalus import public as de
-from dedalus.extras import flow_tools
-from dedalus.tools  import post
-    
 def global_noise(domain, seed=42, scale=None, **kwargs):            
     # Random perturbations, initialized globally for same results in parallel
     gshape = domain.dist.grid_layout.global_shape(scales=domain.dealias)
@@ -81,6 +72,27 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
                     run_time=23.5, run_time_buoyancy=50, run_time_iter=np.inf,
                     max_writes=10, max_slice_writes=10,
                     data_dir='./', coeff_output=True, verbose=False, no_join=False):
+    import os
+    from dedalus.tools.config import config
+    
+    config['logging']['filename'] = os.path.join(data_dir,'logs/dedalus_log')
+    config['logging']['file_level'] = 'DEBUG'
+    
+    import mpi4py.MPI
+    if mpi4py.MPI.COMM_WORLD.rank == 0:
+        if not os.path.exists('{:s}/'.format(data_dir)):
+            os.makedirs('{:s}/'.format(data_dir))
+        logdir = os.path.join(data_dir,'logs')
+        if not os.path.exists(logdir):
+            os.mkdir(logdir)
+    logger = logging.getLogger(__name__)
+    logger.info("saving run in: {}".format(data_dir))
+
+    import time
+    from dedalus import public as de
+    from dedalus.extras import flow_tools
+    from dedalus.tools  import post
+    
     # input parameters
     logger.info("Ra = {}, Pr = {}".format(Rayleigh, Prandtl))
             
@@ -96,11 +108,6 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
     x_basis = de.Fourier('x',   nx, interval=(0, Lx), dealias=3/2)
     z_basis = de.Chebyshev('z', nz, interval=(0, Lz), dealias=3/2)
     domain = de.Domain([x_basis, z_basis], grid_dtype=np.float64)
-
-    if domain.distributor.rank == 0:
-        import os
-        if not os.path.exists('{:s}/'.format(data_dir)):
-            os.mkdir('{:s}/'.format(data_dir))
 
     if fixed_flux:
         T_bc_var = 'Tz'
@@ -345,7 +352,9 @@ def Rayleigh_Benard(Rayleigh=1e6, Prandtl=1, nz=64, nx=None, aspect=4,
 if __name__ == "__main__":
     from docopt import docopt
     args = docopt(__doc__)
-    
+    import logging
+    logger = logging.getLogger(__name__)
+
     from numpy import inf as np_inf
     
     import sys
