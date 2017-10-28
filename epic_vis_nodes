@@ -1,0 +1,1 @@
+ qsub -I -q devel -l select=27:ncpus=6:mpiprocs=6:model=has -W group_list=s1439 -l walltime=02:00:00

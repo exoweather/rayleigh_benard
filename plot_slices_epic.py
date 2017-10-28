@@ -7,7 +7,7 @@ Usage:
 
 Options:
     --output=<output>  Output directory; if blank a guess based on likely case name will be made
-    --fields=<fields>  Comma separated list of fields to plot [default: T,enstrophy]
+    --fields=<fields>  Comma separated list of fields to plot [default: T]
     --small            Make smaller plots (less pixels)
 """
 import numpy as np
@@ -63,12 +63,13 @@ class ImageStack():
             ncols = len(fields)
 
         # Setup spacing [top, bottom, left, right] and [height, width]
-        t_mar, b_mar, l_mar, r_mar = (0.2, 0.2, 0.2, 0.2)
-        t_pad, b_pad, l_pad, r_pad = (0.15, 0.03, 0.03, 0.03)
-        h_cbar, w_cbar = (0.05, 1.)
+        t_mar, b_mar, l_mar, r_mar = (0.0, 0.0, 0.0, 0.0)
+        t_pad, b_pad, l_pad, r_pad = (0.0, 0.0, 0.0, 0.0)
+        h_cbar, w_cbar = (0.0,0.0)
 
-        domain_width = np.max(x)-np.min(x)
-        domain_height = np.max(y)-np.min(y)
+        domain_width = np.round(np.max(x)-np.min(x))
+        domain_height = np.round(np.max(y)-np.min(y))
+        logger.info("domain: {} x {}".format(domain_width, domain_height))
         if true_aspect_ratio:
           h_data, w_data = (1., domain_width/domain_height)
         else:
@@ -79,7 +80,7 @@ class ImageStack():
         h_total = t_mar + nrows * h_im + b_mar
         w_total = l_mar + ncols * w_im + r_mar
 
-        self.dpi_png = int(max(150, len(x)/(w_total))*scale)
+        self.dpi_png = int(len(x)/(w_total)*scale)
         if self.verbose:
             logger.info("figure size is {:g}x{:g} at {} dpi".format(scale * w_total, scale * h_total, self.dpi_png))
             logger.info("     and in px {:g}x{:g}".format(scale * w_total*self.dpi_png, scale * h_total*self.dpi_png))
@@ -105,7 +106,8 @@ class ImageStack():
             bottom = 1 - (t_mar + h_im * row + t_pad + h_cbar) / h_total
             width = w_cbar / w_total
             height = h_cbar / h_total
-            cbax = fig.add_axes([left, bottom, width, height])
+            cbax=None
+            #cbax = fig.add_axes([left, bottom, width, height])
             cbar_axes.append(cbax)
 
             cindex+=1
@@ -123,17 +125,8 @@ class ImageStack():
 
             images.append(image)
             
-        # Title
-        height = 1 - (0.6 * t_mar) / h_total
-        self.timestring = fig.suptitle(r'', y=height, size=16)
-
         self.images = images
         
-        # Set up images and labels        
-        #
-        ##     images[j].set_clim(static_min, static_max)
-        ##     print(fname, ": +- ", -static_min, static_max)
-
     def update(self, fields):
         for i, image in enumerate(self.images):
             image.update_image(fields[i].T)
@@ -149,12 +142,8 @@ class ImageStack():
         
 class Image():
     def __init__(self, field_name, imax, cbax,
-                 xstr='x/H', ystr='z/H',
                  static_scale = True, float_scale=False, fixed_lim=None, even_scale=False, units=True,
                  **kwargs):
-
-        self.xstr = xstr
-        self.ystr = ystr
 
         self.imax = imax
         self.cbax = cbax
@@ -168,35 +157,10 @@ class Image():
         self.units = units
         
         self.set_colortable(**kwargs)
-        self.add_labels(self.field_name)
 
     def set_colortable(self, **kwargs):
         self.colortable = Colortable(self.field_name, **kwargs)
 
-    def add_labels(self, fname):
-        imax = self.imax
-        cbax = self.cbax
-        
-        # Title
-        title = imax.set_title('{:s}'.format(fname), size=14)
-        title.set_y(1.1)
-
-        # Colorbar
-        self.cbax.xaxis.set_ticks_position('top')
-        plt.setp(cbax.get_xticklabels(), size=10)
-
-        if imax.lastrow:
-            imax.set_xlabel(self.xstr, size=12)
-            plt.setp(imax.get_xticklabels(), size=10)
-        else:
-            plt.setp(imax.get_xticklabels(), visible=False)
-
-        if imax.firstcol:
-            self.imax.set_ylabel(self.ystr, size=12)
-            plt.setp(imax.get_yticklabels(), size=10)
-        else:
-            plt.setp(imax.get_yticklabels(), visible=False)
-             
     def create_limits_mesh(self, x, y):
         xd = np.diff(x)
         yd = np.diff(y)
@@ -232,11 +196,6 @@ class Image():
             plot_extent = [-0.5, shape[1] - 0.5, -0.5, shape[0] - 0.5]
             imax.axis(plot_extent)
 
-        cb = fig.colorbar(im, cax=cbax, orientation='horizontal',
-                          ticks=ticker.MaxNLocator(nbins=5, prune='both'))
-
-        cb.formatter.set_powerlimits((4, 3))
-        cb.update_ticks()
         self.im = im
 
     def set_limits(self, x_limits, y_limits):
@@ -250,10 +209,6 @@ class Image():
             im.set_array(np.ravel(data))
         else:
             im.set_data(data)
-
-        #if not self.static_scale or self.float_scale:
-        #image_min, image_max = self.get_scale(data, fixed_lim=self.fixed_lim, even_scale=self.even_scale)
-        
 
     def percent_trim(self, data, percent_cut=0.1):
         if isinstance(percent_cut, list):
@@ -351,7 +306,7 @@ def main(files, fields, output_path='./', output_name='snapshot',
         i_fig = data.writes[i]
         # Update time title
         tstr = 't = {:6.3e}'.format(time)
-        imagestack.timestring.set_text(tstr)
+        #imagestack.timestring.set_text(tstr)
         imagestack.write(output_path, output_name, i_fig)
         imagestack.close()
 
